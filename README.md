@@ -1,17 +1,25 @@
 # Legion Frame Hub
 
-Legion Frame Hub is an unofficial Windows companion for Lenovo Legion Go. The home screen shows installed Steam games and manually added game shortcuts, with tabs for Scalers, Frame Gen and Settings. The quick panel can open the stock Legion Space app. Frame Hub does not edit Lenovo controller services or write its own fan curves.
+Legion Frame Hub is an unofficial Windows companion for Lenovo Legion Go. The home screen shows installed Steam games and manually added game shortcuts, with separate Scalers, Frame Gen and Settings tabs. Free tools can be installed and updated inside the Hub from their official public GitHub releases. The quick panel can open the stock Legion Space app. Frame Hub does not edit Lenovo controller services or write its own fan curves.
 
 ## Install and open
 
 1. On your Legion Go, open the [latest GitHub release](../../releases/latest) while signed into the account that owns the private repository.
-2. Download `LegionFrameHub.exe` from Assets, put it in a folder you own and double-click it. No ZIP extraction, separate .NET installation, or administrator access is required for the dashboard. The ZIP is optional.
+2. Download `LegionFrameHub.exe` from Assets, put it in a folder you own and double-click it. No ZIP extraction, separate .NET installation, or administrator access is required for the dashboard.
 3. Use a **borderless** or **windowed** game. With the game focused, press **Ctrl+Alt+F10** to toggle the right-side panel or **Ctrl+Alt+F11** for the full dashboard. On an XInput controller, hold **LB+RB** and tap **View** for the panel or **Menu** for the dashboard. These chords can also reach the game. You can also open the app from the system tray, although you should summon it from inside the game to capture that game as a shortcut target.
 4. Closing the window hides it to the tray; choose **Exit** in the tray to stop it. Remove the extracted app folder to uninstall Frame Hub itself. Remove any managed OptiScaler installations first if you no longer want them.
 
 This preview is unsigned. Windows may show a SmartScreen warning. Verify the private repository and the SHA-256 checksum asset if you want to confirm the EXE matches the published build. Do not disable Windows security features. In PowerShell use `Get-FileHash .\LegionFrameHub.exe -Algorithm SHA256`.
 
 ## In-app updates
+
+### Free tools
+
+The **Scalers** tab offers OptiScaler and Magpie. The **Frame Gen** tab offers the same OptiScaler installation for the selected game, plus vendor hotkeys. Choose **Install** or **Update** on the tool you want. The Hub checks the latest stable release from [OptiScaler](https://github.com/optiscaler/OptiScaler/releases) or [Magpie](https://github.com/Blinue/Magpie/releases), verifies the download against GitHub’s SHA-256 digest, and installs the package after confirmation. Public tool downloads don’t require GitHub CLI or a GitHub login. Settings also links to the relevant tools and has release-check buttons.
+
+**Magpie** is a free window scaler, not frame generation. Frame Hub installs its Windows x64 build to `%LOCALAPPDATA%\LegionFrameHub\tools\magpie`. Select **Open Magpie** to start it. Exit Magpie from the tray before updating or removing it. Using the managed install does not replace other copies on your PC. Paid Lossless Scaling stays with Steam; AMD AFMF stays with your graphics driver and AMD Software.
+
+### Frame Hub itself
 
 Under **Settings → Check & install Frame Hub update**, the app queries this private repo using [GitHub CLI](https://cli.github.com/). Install the CLI and run `gh auth login` once outside Frame Hub using the GitHub account with access to the repo. Frame Hub does not prompt for or store a GitHub token. It checks the EXE against GitHub’s SHA-256 release digest before replacing the portable copy and restarting. Keep the filename `LegionFrameHub.exe` and use a writable location. An update leaves the previous EXE as a rollback copy next to the app; it does not change your game library or OptiScaler files. **Open GitHub Releases** provides a browser alternative.
 
@@ -43,9 +51,9 @@ For custom fan curves, open [Lenovo Legion Space](https://support.lenovo.com/us/
 ### Manage OptiScaler
 
 1. Use this only for a compatible offline game without anti-cheat. Close the game first. Check the [upstream game compatibility list](https://github.com/optiscaler/OptiScaler/wiki/General-Compatibility-List).
-2. From the **Scalers** tab, open **Official releases** and download the build you want from upstream. Extract it into a separate folder. Select the extracted folder that directly contains `OptiScaler.dll`. Frame Hub does not automatically download a DLL or run any upstream installer scripts.
-3. Select the game’s actual `.exe` (often a `*-Win64-Shipping.exe` under `Binaries\Win64` for Unreal Engine), choose the proxy DLL name documented for that game, enter the release tag, and choose **Install / replace**.
-4. **Check latest release** reads GitHub’s latest published release tag; it does not fetch prereleases or infer the installed version from DLL contents. To update, extract the new build separately, select it, and choose **Install / replace** again. **Remove managed files** removes the tracked payload, but keeps `OptiScaler.ini`. Existing settings are preserved, so new options or per-title dependencies may require work using the official guide.
+2. In **Scalers → OptiScaler** or **Frame Gen**, select the game’s actual `.exe` (often a `*-Win64-Shipping.exe` under `Binaries\Win64` for Unreal Engine). Choose a different loader only if the official guide for that game calls for one.
+3. Tap **Install from GitHub** or **Update from GitHub**. Frame Hub downloads and extracts the verified release, saves its version for that game, and installs the managed files without running upstream installer scripts. It remembers the last selected game. Some games still need specific upstream setup; consult the compatibility guide.
+4. **Remove managed files** removes the tracked payload, but keeps `OptiScaler.ini`. Existing settings are preserved. For a manually chosen build, use **Manual options**, extract the archive yourself, and select the folder that directly contains `OptiScaler.dll`.
 
 The manager checks for pre-existing file conflicts, rejects linked folders, tracks installed files by hash, and refuses to remove or replace externally modified managed binaries. It does not adopt earlier manual installs or perform extra game-specific setup. Game stores or launchers may prevent writes to protected locations; Frame Hub does not bypass those restrictions.
 
@@ -60,6 +68,6 @@ dotnet run --project tests/OptiFiles.Tests.csproj -c Release
 dotnet publish src/LegionFrameHub.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none -o artifacts/win-x64
 ```
 
-The automated test harness uses dummy files, not a game or a mod download. The preview does not claim on-device testing or compatibility with every Legion Go model, driver, and game.
+The default automated tests use disposable, dummy files. To also test archive compatibility, pass the path to an official OptiScaler `.7z` and a Magpie x64 `.zip` as the two trailing arguments, in that order. The archive test never launches the downloaded software. The preview does not claim on-device testing or compatibility with every Legion Go model, driver, and game.
 
 The executable icon uses the cropped and recolored Legion mark from [Lenovo’s Legion logo on Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Lenovo_Legion_Logo.png). Lenovo and Legion are Lenovo trademarks. This project is not affiliated with or endorsed by Lenovo.

@@ -1,5 +1,6 @@
 using FrameHub;
 using System.Text.Json;
+using System.IO.Compression;
 
 var root = Path.Combine(Path.GetTempPath(), "framehub-test-" + Guid.NewGuid().ToString("N"));
 var game = Directory.CreateDirectory(Path.Combine(root, "game")).FullName;
@@ -31,6 +32,20 @@ try
     Expect(HubUpdate.ParseRelease(metadata.Replace("v0.3.0", "v0.1.0"), current) is null, "older release cannot trigger a downgrade");
     Reject(() => HubUpdate.ParseRelease(metadata.Replace("sha256:", ""), current), "verifiable", "rejects missing trusted release digest");
     Reject(() => HubUpdate.ParseRelease(metadata.Replace("LegionFrameHub.exe", "unexpected.exe"), current), "verifiable", "rejects unexpected release asset");
+    var toolMetadata = $$"""{"tag_name":"v0.13.0","draft":false,"prerelease":false,"assets":[{"name":"Magpie-v0.13.0-x64.zip","size":1200,"digest":"sha256:{{digest}}","browser_download_url":"https://github.com/Blinue/Magpie/releases/download/v0.13.0/Magpie-v0.13.0-x64.zip"}]}""";
+    Expect(ToolCatalog.Parse(ToolCatalog.MagpieRepo, toolMetadata).Tag == "v0.13.0", "accepts official stable x64 Magpie release");
+    Reject(() => ToolCatalog.Parse(ToolCatalog.MagpieRepo, toolMetadata.Replace("github.com", "mirror.invalid")), "official", "rejects download URL outside official repo");
+    Reject(() => ToolCatalog.Parse(ToolCatalog.MagpieRepo, toolMetadata.Replace("x64", "ARM64")), "official", "rejects wrong package architecture");
+    Reject(() => ToolCatalog.Parse(ToolCatalog.MagpieRepo, toolMetadata.Replace("\"prerelease\":false", "\"prerelease\":true")), "stable", "rejects prerelease package");
+    Reject(() => ToolCatalog.ArchivePath(root, "../escaped.dll"), "unsafe path", "archive path traversal rejected");
+    Reject(() => ToolCatalog.ArchivePath(root, "folder/NUL.txt"), "unsafe path", "Windows device names rejected");
+    Reject(() => ToolCatalog.ArchivePath(root, "file.txt:payload"), "unsafe path", "NTFS alternate data streams rejected");
+    string zip = Path.Combine(root, "known.zip");
+    using (var payload = ZipFile.Open(zip, ZipArchiveMode.Create))
+    using (var output = new StreamWriter(payload.CreateEntry("payload/Magpie.exe").Open()))
+        output.Write("test exe");
+    string unpacked = Directory.CreateDirectory(Path.Combine(root, "zip-stage")).FullName;
+    Expect(File.ReadAllText(Path.Combine(ToolCatalog.Unpack(zip, unpacked, "Magpie.exe"), "Magpie.exe")) == "test exe", "extracts and identifies payload folder");
     File.WriteAllText(InGame("game.exe"), "original game");
     File.WriteAllText(InGame("dxgi.dll"), "another mod");
     File.WriteAllText(InPackage("OptiScaler.dll"), "v1 test payload");
@@ -70,6 +85,23 @@ try
         File.CreateSymbolicLink(InPackage("linked.dll"), InGame("game.exe"));
         string cleanGame = Directory.CreateDirectory(Path.Combine(root, "clean")).FullName;
         Reject(() => OptiFiles.Change(cleanGame, package, "dxgi.dll", "v2"), "symbolic links", "package symbolic links are rejected");
+    }
+    if (args.Length == 2)
+    {
+        string optiTree = Directory.CreateDirectory(Path.Combine(root, "real-opti")).FullName;
+        string magpieTree = Directory.CreateDirectory(Path.Combine(root, "real-magpie")).FullName;
+        string optiPayload = ToolCatalog.Unpack(args[0], optiTree, "OptiScaler.dll");
+        string magpiePayload = ToolCatalog.Unpack(args[1], magpieTree, "Magpie.exe");
+        Expect(File.Exists(Path.Combine(magpiePayload, "Magpie.exe")), "extracts official Magpie x64 ZIP");
+        var demoGame = Directory.CreateDirectory(Path.Combine(root, "fixture-game")).FullName;
+        var optiReceipt = OptiFiles.Change(demoGame, optiPayload, "dxgi.dll", "fixture");
+        Expect(optiReceipt?.Files.Count > 5 && File.Exists(Path.Combine(demoGame, "dxgi.dll")), "manages official OptiScaler 7z in a disposable game directory");
+    }
+    if (args is ["--live-tool"])
+    {
+        var official = await ToolCatalog.Latest(ToolCatalog.MagpieRepo);
+        using var fixture = await ToolCatalog.Fetch(official, "Magpie.exe", Console.WriteLine);
+        Expect(File.Exists(Path.Combine(fixture.Payload, "Magpie.exe")), "downloads, verifies and stages latest public Magpie release");
     }
 }
 finally { Directory.Delete(root, true); }

@@ -12,6 +12,14 @@ internal static class GameShelf
     }
     internal static string DataFolder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LegionFrameHub");
     static string Config => Path.Combine(DataFolder, "games.json");
+    static string ScalerGame => Path.Combine(DataFolder, "scaler-game.txt");
+    internal static string? LoadScalerGame() => File.Exists(ScalerGame) ? File.ReadAllText(ScalerGame) : null;
+    internal static void SaveScalerGame(string path)
+    {
+        Directory.CreateDirectory(DataFolder);
+        File.WriteAllText(ScalerGame + ".tmp", path);
+        File.Move(ScalerGame + ".tmp", ScalerGame, overwrite: true);
+    }
     internal static List<Entry> Load() => File.Exists(Config)
         ? JsonSerializer.Deserialize<List<Entry>>(File.ReadAllText(Config)) ?? [] : [];
     internal static void Save(List<Entry> items)

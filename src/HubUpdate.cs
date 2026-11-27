@@ -10,7 +10,7 @@ internal static class HubUpdate
     internal const string Repo = "devin12310-prog/Legion-Frame-Hub";
     internal const string Releases = "https://github.com/" + Repo + "/releases/latest";
     internal const string AssetName = "LegionFrameHub.exe";
-    internal static Version Current => typeof(HubUpdate).Assembly.GetName().Version ?? new Version(0, 2, 0, 0);
+    internal static Version Current => typeof(HubUpdate).Assembly.GetName().Version ?? new Version(0, 3, 0, 0);
     internal sealed record Candidate(string Tag, Version Version, string Digest, long Size);
 
     static string Cli()

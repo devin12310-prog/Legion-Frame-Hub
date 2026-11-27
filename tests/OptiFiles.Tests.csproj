@@ -9,5 +9,7 @@
     <Compile Include="../src/OptiFiles.cs" Link="OptiFiles.cs" />
     <Compile Include="../src/HubUpdate.cs" Link="HubUpdate.cs" />
     <Compile Include="../src/GameShelf.cs" Link="GameShelf.cs" />
+    <Compile Include="../src/ToolCatalog.cs" Link="ToolCatalog.cs" />
+    <PackageReference Include="SharpCompress" Version="1.0.0" />
   </ItemGroup>
 </Project>

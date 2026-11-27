@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using System.Net.Http.Json;
-using System.Text.Json.Serialization;
 
 namespace FrameHub;
 
@@ -13,19 +11,10 @@ internal sealed class Hub : Form
     const string Steam = "https://store.steampowered.com/app/993090/Lossless_Scaling/";
     static readonly Color Surface = Color.FromArgb(18, 23, 33), Card = Color.FromArgb(31, 40, 56),
         Ink = Color.FromArgb(239, 246, 255), Muted = Color.FromArgb(174, 192, 216), Accent = Color.FromArgb(91, 229, 195);
-    static readonly HttpClient Http = MakeHttp();
-    static HttpClient MakeHttp()
-    {
-        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("LegionFrameHub/0.2");
-        client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
-        return client;
-    }
-    sealed record Release([property: JsonPropertyName("tag_name")] string Tag);
-
     readonly NotifyIcon tray;
     readonly System.Windows.Forms.Timer controller = new() { Interval = 60 };
     readonly Label status = new() { Dock = DockStyle.Bottom, Height = 42, Padding = new(12, 0, 12, 0), TextAlign = ContentAlignment.MiddleLeft };
+    readonly ProgressBar operation = new() { Dock = DockStyle.Bottom, Height = 5, Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 25, Visible = false };
     readonly Panel scroller = new() { AutoScroll = true, Dock = DockStyle.Fill, Padding = new(16, 12, 16, 12) };
     readonly TableLayoutPanel stack = new() { ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Top };
     readonly TextBox game = new() { ReadOnly = true, PlaceholderText = "Select the game’s main .exe" };
@@ -36,7 +25,7 @@ internal sealed class Hub : Form
     string tab = "Installed Games", message = "Ready.";
     List<GameShelf.Entry> localGames = [];
     GameShelf.Entry[] steamGames = [];
-    bool quick, quitting, busy, shortcutsActive;
+    bool quick, quitting, busy, shortcutsActive, advancedScaler, showMagpie;
     int previousChord;
     IntPtr returnWindow;
     string returnProcess = "";
@@ -52,7 +41,7 @@ internal sealed class Hub : Form
         Size = new(843, 680);
         StartPosition = FormStartPosition.CenterScreen;
         status.BackColor = Card; status.ForeColor = Muted;
-        scroller.Controls.Add(stack); Controls.Add(scroller); Controls.Add(status);
+        scroller.Controls.Add(stack); Controls.Add(scroller); Controls.Add(operation); Controls.Add(status);
         stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         loader.Items.AddRange(OptiFiles.LoaderNames.Cast<object>().ToArray()); loader.SelectedIndex = 0;
 
@@ -77,6 +66,12 @@ internal sealed class Hub : Form
         KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) Hide(); };
         try { localGames = GameShelf.Load(); }
         catch (Exception) { Note("The saved game list couldn’t be read. Review games.json before adding or removing entries."); }
+        try
+        {
+            var selected = GameShelf.LoadScalerGame();
+            if (File.Exists(selected)) { game.Text = selected; InspectOpti(); }
+        }
+        catch (Exception) { Note("The last scaler game could not be restored. Choose the game again."); }
         Shown += (_, _) => RefreshGames();
         Render();
     }
@@ -172,7 +167,7 @@ internal sealed class Hub : Form
     {
         var button = new Button
         {
-            Text = label, AutoSize = true, MinimumSize = new(112, 36),
+            Text = label, AutoSize = true, MinimumSize = new(112, 44),
             BackColor = Card, ForeColor = Ink, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand,
             Padding = new(10, 3, 10, 3), Margin = new(4)
         };
@@ -191,6 +186,23 @@ internal sealed class Hub : Form
         stack.Controls.Add(control, 0, row);
     }
     void Line(string text, int size = 10, bool strong = false) => Add(TextLine(text, size, strong));
+    void Section(string title)
+    {
+        Add(new Panel { Height = 1, Dock = DockStyle.Fill, BackColor = Color.FromArgb(45, 59, 79), Margin = new(4, 12, 4, 3) });
+        Line(title, 15, true);
+    }
+    void Navigation()
+    {
+        var row = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Fill, WrapContents = true };
+        foreach (var name in new[] { "Installed Games", "Scalers", "Frame Gen", "Settings" })
+        {
+            var button = ButtonFor(name, () => SelectTab(name));
+            if (tab == name) { button.BackColor = Accent; button.ForeColor = Surface; button.FlatAppearance.MouseOverBackColor = Accent; }
+            row.Controls.Add(button);
+        }
+        row.Controls.Add(ButtonFor("Quick panel", () => OpenMode(true, false)));
+        Add(row);
+    }
     void Buttons(params (string Label, Action Click)[] actions)
     {
         var row = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Fill, WrapContents = true, Margin = new(0) };
@@ -213,10 +225,7 @@ internal sealed class Hub : Form
             Line(quick ? "Return to your game with Esc or the panel shortcut." : $"Unofficial Windows companion for Lenovo Legion Go  •  Preview {HubUpdate.Current.ToString(3)}");
             if (quick)
                 Buttons(("Full dashboard", () => OpenMode(false, false)), ("Close panel", Hide));
-            else
-                Buttons(("Installed Games", () => SelectTab("Installed Games")), ("Scalers", () => SelectTab("Scalers")),
-                    ("Frame Gen", () => SelectTab("Frame Gen")), ("Settings", () => SelectTab("Settings")),
-                    ("Quick panel", () => OpenMode(true, false)));
+            else Navigation();
             if (quick)
             {
                 Buttons(("Open Lenovo Legion Space", OpenLegionSpace));
@@ -227,8 +236,8 @@ internal sealed class Hub : Form
             {
                 switch (tab)
                 {
-                    case "Scalers": OptiPage(); break;
-                    case "Frame Gen": FrameGeneration(); Help(); break;
+                    case "Scalers": ScalersPage(); break;
+                    case "Frame Gen": FrameGenPage(); break;
                     case "Settings": SettingsPage(); break;
                     default: GamesPage(); break;
                 }
@@ -274,8 +283,9 @@ internal sealed class Hub : Form
         Buttons(("Play selected", Play), ("Manage game scaler", () =>
         {
             if (list.SelectedItem is not GameShelf.Entry entry) return;
-            if (entry.Steam) { game.Clear(); SelectTab("Scalers"); Note("Choose this Steam game’s main .exe to manage OptiScaler."); }
-            else { game.Text = entry.Location; SelectTab("Scalers"); InspectOpti(); }
+            showMagpie = false;
+            if (entry.Steam) { game.Clear(); loader.SelectedIndex = 0; SelectTab("Scalers"); Note("Choose this Steam game’s main .exe to manage OptiScaler."); }
+            else { SetScalerGame(entry.Location); SelectTab("Scalers"); }
         }), ("Remove added game", () =>
         {
             if (list.SelectedItem is not GameShelf.Entry { Steam: false } entry) return;
@@ -299,6 +309,10 @@ internal sealed class Hub : Form
         Buttons(("Check & install Frame Hub update", UpdateApp), ("Open GitHub Releases", () => Open(HubUpdate.Releases)),
             ("Get GitHub CLI", () => Open("https://cli.github.com/")));
         Line("The repo is private. Automatic updates use a signed-in GitHub CLI session on this PC. Browser downloads work without installing the CLI.");
+        Section("Tool updates");
+        Line("Free catalog tools check their public GitHub releases without signing in. Select a game in order to update its OptiScaler install.");
+        Buttons(("Install / update Magpie", InstallMagpie), ("Install / update selected game", InstallOpti),
+            ("Check Magpie", () => CheckTool(ToolCatalog.MagpieRepo)), ("Check OptiScaler", () => CheckTool(ToolCatalog.OptiRepo)));
         Line("Legion buttons and fan", 14, true);
         Buttons(("Open Lenovo Legion Space", OpenLegionSpace), ("Close Legion Space UI…", CloseSpace),
             ("Lenovo downloads", () => Open(LegionSpace.Support)));
@@ -342,9 +356,27 @@ internal sealed class Hub : Form
         if (!quick)
         {
             Line("Turn native FSR, XeSS or DLSS frame generation on or off in the game’s own graphics menu where supported. AMD graphics options stay in Adrenalin.");
-            Buttons(("Launch Lossless Scaling", () => Open("steam://run/993090")), ("Lossless Scaling on Steam", () => Open(Steam)),
-                ("AMD AFMF help", () => Open(AMD)), ("OptiScaler compatibility", () => Open(Opti + "/wiki")));
         }
+    }
+    void FrameGenPage()
+    {
+        Line("Frame Gen", 20, true);
+        OptiPage();
+        Section("In-game controls");
+        FrameGeneration();
+        Section("Driver and store options");
+        Line("AMD AFMF is a driver feature. Lossless Scaling is paid and is installed and updated by Steam, not by Frame Hub.");
+        Buttons(("AMD AFMF setup", () => Open(AMD)), ("Launch Lossless Scaling", () => Open("steam://run/993090")),
+            ("Lossless Scaling on Steam", () => Open(Steam)));
+        Help();
+    }
+    void ScalersPage()
+    {
+        Line("Scalers", 20, true);
+        Line("Choose a game mod or a window scaler. Each tool has its own install and update controls.");
+        Buttons((showMagpie ? "OptiScaler · Per game" : "OptiScaler · Selected", () => { showMagpie = false; Render(); }),
+            (showMagpie ? "Magpie · Selected" : "Magpie · Window scaler", () => { showMagpie = true; Render(); }));
+        if (showMagpie) MagpiePage(); else OptiPage();
     }
     void Help()
     {
@@ -403,22 +435,120 @@ internal sealed class Hub : Form
 
     void OptiPage()
     {
-        Line("OptiScaler package manager", 14, true);
-        Line("For compatible offline games only. Do not use with anti-cheat or protected multiplayer titles. Close the game before making changes.");
-        Buttons(("Official releases", () => Open(Opti + "/releases")), ("Check latest release", CheckRelease),
-            ("Install & compatibility guide", () => Open(Opti + "/wiki/Manual-Installation")));
-        Buttons(("Choose game .exe", ChooseGame), ("Choose extracted package", ChoosePackage));
-        Field(game); Field(package);
-        Line("Loader (match the upstream guide for your game)"); Field(loader);
-        Line("Version label (for comparing with GitHub)"); Field(version);
-        Buttons(("Install / replace", () => ChangeOpti(false)), ("Remove managed files", () => ChangeOpti(true)),
-            ("Inspect installed receipt", InspectOpti));
-        Line("Install from an extracted official release containing OptiScaler.dll. The manager refuses to overwrite unrelated files and leaves OptiScaler.ini in place on update or removal.");
+        Section("OptiScaler  •  Free");
+        Line(tab == "Frame Gen" ? "Use per-game frame generation on compatible titles. This is the same package managed in Scalers; you only install it once per game." :
+            "Manage upscaling for a compatible game. The same package also provides frame-generation options in the Frame Gen tab.");
+        Line("Offline games only. Do not use in games with anti-cheat. Close the game before installing or updating.");
+        Buttons(("Choose game .exe", ChooseGame), ("Game compatibility", () => Open(Opti + "/wiki")));
+        Field(game);
+        var installed = OptiVersion();
+        Line(File.Exists(game.Text) ? $"Managed version: {installed ?? "Not installed"}" : "Choose a game to see its installed version.", 11, true);
+        Line("Loader: dxgi.dll is the default. Change it only if your game’s compatibility guide calls for another.");
+        Field(loader);
+        Buttons((installed is null ? "Install from GitHub" : "Update from GitHub", InstallOpti),
+            ("Check latest release", () => CheckTool(ToolCatalog.OptiRepo)), ("Remove managed files", () => ChangeOpti(true)));
+        Buttons((advancedScaler ? "Hide manual options" : "Manual options", () => { advancedScaler = !advancedScaler; Render(); }),
+            ("Official release notes", () => Open(Opti + "/releases")));
+        if (advancedScaler)
+        {
+            Buttons(("Choose extracted package", ChoosePackage), ("Manual install / replace", () => ChangeOpti(false)),
+                ("Install guide", () => Open(Opti + "/wiki/Manual-Installation")));
+            Field(package); Field(version);
+        }
+    }
+    string? OptiVersion()
+    {
+        if (!File.Exists(game.Text)) return null;
+        try { return OptiFiles.Read(GameDirectory())?.Version; }
+        catch (Exception) { return "Unknown; inspect this game folder"; }
+    }
+    static bool UpToDate(string? installed, string tag)
+    {
+        if (string.Equals(installed, tag, StringComparison.OrdinalIgnoreCase)) return true;
+        return Version.TryParse(installed?.TrimStart('v', 'V'), out var current) &&
+            Version.TryParse(tag.TrimStart('v', 'V'), out var latest) && current >= latest;
+    }
+    void CheckTool(string repo) => Run("Checking the official GitHub release", async () =>
+    {
+        var asset = await ToolCatalog.Latest(repo);
+        var name = repo == ToolCatalog.OptiRepo ? "OptiScaler" : "Magpie";
+        var installed = repo == ToolCatalog.OptiRepo ? OptiVersion() : ToolCatalog.MagpieInstalled();
+        var result = UpToDate(installed, asset.Tag) ? "Installed version is up to date." : "Install or update from the tool’s card.";
+        var message = $"{name}: GitHub {asset.Tag}  •  Managed: {installed ?? "Not installed"}. {result}";
+        MessageBox.Show(this, message, Text);
+        return message;
+    });
+    void InstallOpti()
+    {
+        if (busy) { Note("Wait for the current operation to finish."); return; }
+        var dir = GameDirectory();
+        var exe = game.Text;
+        var proxy = loader.Text;
+        EnsureGameClosed(exe);
+        var previous = OptiFiles.Read(dir)?.Version;
+        Run("Checking official OptiScaler releases", async () =>
+        {
+            var asset = await ToolCatalog.Latest(ToolCatalog.OptiRepo);
+            if (UpToDate(previous, asset.Tag)) return $"OptiScaler {previous} is up to date for this game.";
+            if (MessageBox.Show(this,
+                $"Download and {(previous is null ? "install" : "update to")} OptiScaler {asset.Tag} from its official GitHub release?\n\nGame: {Path.GetFileName(exe)}\nLoader: {proxy}\n\nConfirm this game is offline, compatible and does not use anti-cheat.",
+                Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.OK)
+                return "OptiScaler installation canceled.";
+            using var staged = await ToolCatalog.Fetch(asset, "OptiScaler.dll", Note);
+            EnsureGameClosed(exe);
+            Note("Installing verified OptiScaler files…");
+            await Task.Run(() => OptiFiles.Change(dir, staged.Payload, proxy, asset.Tag));
+            Render();
+            return $"OptiScaler {asset.Tag} is installed for {Path.GetFileNameWithoutExtension(exe)}.";
+        });
+    }
+    void MagpiePage()
+    {
+        Section("Magpie  •  Free");
+        Line("Upscale a windowed game without changing its files. This is a scaler, not frame generation.");
+        var version = ToolCatalog.MagpieInstalled();
+        Line($"Managed version: {version ?? "Not installed"}", 11, true);
+        Buttons((version is null ? "Install Magpie" : "Update Magpie", InstallMagpie),
+            ("Check latest release", () => CheckTool(ToolCatalog.MagpieRepo)), ("Open Magpie", ToolCatalog.LaunchMagpie));
+        Buttons(("Scale game window", () => Forward("Magpie windowed scaling", 0x12, 0x10, 0x51)),
+            ("Magpie release notes", () => Open("https://github.com/" + ToolCatalog.MagpieRepo + "/releases")), ("Remove Magpie", RemoveMagpie));
+        Line("Open Magpie first. For in-game scaling, summon Frame Hub from the game and leave Magpie’s default Alt+Shift+Q shortcut enabled.");
+    }
+    void InstallMagpie() => Run("Checking official Magpie releases", async () =>
+    {
+        var asset = await ToolCatalog.Latest(ToolCatalog.MagpieRepo);
+        var previous = ToolCatalog.MagpieInstalled();
+        if (UpToDate(previous, asset.Tag)) return $"Magpie {previous} is up to date.";
+        if (MessageBox.Show(this, $"Download and {(previous is null ? "install" : "update to")} Magpie {asset.Tag} from its official GitHub release? Close Magpie first if it is running.",
+            Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.OK) return "Magpie installation canceled.";
+        using var staged = await ToolCatalog.Fetch(asset, "Magpie.exe", Note);
+        await Task.Run(() => ToolCatalog.InstallMagpie(staged.Payload, asset.Tag));
+        Render();
+        return $"Magpie {asset.Tag} is installed. Select Open Magpie to launch it.";
+    });
+    void RemoveMagpie()
+    {
+        if (busy) return;
+        if (MessageBox.Show(this, "Remove the Hub-managed Magpie files? This does not remove your games.", Text,
+            MessageBoxButtons.OKCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.OK) return;
+        Run("Removing managed Magpie files", async () =>
+        {
+            await Task.Run(ToolCatalog.RemoveMagpie);
+            Render();
+            return "Hub-managed Magpie files removed.";
+        });
     }
     void ChooseGame()
     {
         using var dialog = new OpenFileDialog { Filter = "Game executable (*.exe)|*.exe", CheckFileExists = true };
-        if (dialog.ShowDialog(this) == DialogResult.OK) { game.Text = dialog.FileName; InspectOpti(); }
+        if (dialog.ShowDialog(this) == DialogResult.OK) { SetScalerGame(dialog.FileName); Render(); }
+    }
+    void SetScalerGame(string path)
+    {
+        GameShelf.SaveScalerGame(path);
+        game.Text = path;
+        loader.SelectedIndex = 0;
+        InspectOpti();
     }
     void ChoosePackage()
     {
@@ -443,25 +573,13 @@ internal sealed class Hub : Form
         }
         else Note("No Frame Hub-managed installation in this game folder.");
     }
-    void CheckRelease() => Run("Checking official OptiScaler releases", async () =>
-    {
-        var release = await Http.GetFromJsonAsync<Release>("https://api.github.com/repos/optiscaler/OptiScaler/releases/latest");
-        if (string.IsNullOrWhiteSpace(release?.Tag)) throw new IOException("GitHub did not return an official release tag.");
-        var installed = File.Exists(game.Text) ? OptiFiles.Read(GameDirectory())?.Version : null;
-        string info = $"Latest tag reported by GitHub: {release.Tag}.";
-        if (installed is not null) info += $" Selected game’s managed label: {installed}.";
-        MessageBox.Show(this, info + "\n\nUse Official releases to select and download a package. Nothing was downloaded or installed.", Text);
-        return info;
-    });
     void ChangeOpti(bool remove)
     {
         if (busy) { Note("Another operation is already running."); return; }
         var dir = GameDirectory();
         var source = remove ? null : package.Text;
         if (!remove && !Directory.Exists(source)) throw new InvalidOperationException("Select the extracted official package folder.");
-        string name = Path.GetFileNameWithoutExtension(game.Text);
-        using var running = new ProcessList(Process.GetProcessesByName(name));
-        if (running.Items.Length != 0) throw new InvalidOperationException("Close the game before changing its files.");
+        EnsureGameClosed(game.Text);
         var proxy = loader.Text;
         string build = string.IsNullOrWhiteSpace(version.Text) ? "version not specified" : version.Text.Trim();
         string summary = remove ?
@@ -471,13 +589,15 @@ internal sealed class Hub : Form
         Run(remove ? "Removing managed files" : "Staging OptiScaler", async () =>
         {
             var receipt = await Task.Run(() => OptiFiles.Change(dir, source, proxy, build));
+            Render();
             return receipt is null ? "Managed files removed. Existing OptiScaler.ini was kept." : $"Installed {receipt.Version}: {receipt.Files.Count} tracked files.";
         });
     }
-    sealed class ProcessList(Process[] items) : IDisposable
+    static void EnsureGameClosed(string file)
     {
-        internal Process[] Items => items;
-        public void Dispose() { foreach (var process in items) process.Dispose(); }
+        var matches = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(file));
+        foreach (var process in matches) process.Dispose();
+        if (matches.Length != 0) throw new InvalidOperationException("Close the game before changing its files.");
     }
 
     void Drivers()
@@ -521,10 +641,11 @@ internal sealed class Hub : Form
     {
         if (busy) { Note("Another operation is already running."); return; }
         busy = true;
+        operation.Visible = true;
         Note(description + "…");
         try { Note(await work()); }
         catch (Exception e) { ShowError(e); }
-        finally { busy = false; }
+        finally { busy = false; operation.Visible = false; }
     }
     void ShowError(Exception e)
     {
