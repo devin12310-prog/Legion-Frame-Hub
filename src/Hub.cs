@@ -17,7 +17,7 @@ internal sealed class Hub : Form
     static HttpClient MakeHttp()
     {
         var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("LegionFrameHub/0.1");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("LegionFrameHub/0.2");
         client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
         return client;
     }
@@ -33,7 +33,9 @@ internal sealed class Hub : Form
     readonly TextBox version = new() { PlaceholderText = "Release tag, e.g. v0.x.y (optional)", MaxLength = 80 };
     readonly ComboBox loader = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     readonly Rectangle fullMinimum = new(0, 0, 580, 420);
-    string tab = "Frame gen", message = "Ready.";
+    string tab = "Installed Games", message = "Ready.";
+    List<GameShelf.Entry> localGames = [];
+    GameShelf.Entry[] steamGames = [];
     bool quick, quitting, busy, shortcutsActive;
     int previousChord;
     IntPtr returnWindow;
@@ -42,6 +44,8 @@ internal sealed class Hub : Form
     internal Hub()
     {
         Text = "Legion Frame Hub";
+        var appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        if (appIcon is not null) Icon = appIcon;
         BackColor = Surface; ForeColor = Ink; Font = new("Segoe UI", 10);
         AutoScaleMode = AutoScaleMode.Dpi;
         MinimumSize = fullMinimum.Size;
@@ -52,7 +56,7 @@ internal sealed class Hub : Form
         stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         loader.Items.AddRange(OptiFiles.LoaderNames.Cast<object>().ToArray()); loader.SelectedIndex = 0;
 
-        tray = new NotifyIcon { Icon = SystemIcons.Application, Text = "Legion Frame Hub", Visible = true, ContextMenuStrip = new() };
+        tray = new NotifyIcon { Icon = appIcon ?? SystemIcons.Application, Text = "Legion Frame Hub", Visible = true, ContextMenuStrip = new() };
         tray.ContextMenuStrip.Items.Add("Quick panel", null, (_, _) => OpenMode(true));
         tray.ContextMenuStrip.Items.Add("Full dashboard", null, (_, _) => OpenMode(false));
         tray.ContextMenuStrip.Items.Add("Exit", null, (_, _) => Exit());
@@ -68,9 +72,12 @@ internal sealed class Hub : Form
         {
             if (!quitting && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); }
         };
-        FormClosed += (_, _) => { controller.Dispose(); tray.ContextMenuStrip?.Dispose(); tray.Dispose(); };
+        FormClosed += (_, _) => { controller.Dispose(); tray.ContextMenuStrip?.Dispose(); tray.Dispose(); appIcon?.Dispose(); };
         KeyPreview = true;
         KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) Hide(); };
+        try { localGames = GameShelf.Load(); }
+        catch (Exception) { Note("The saved game list couldn’t be read. Review games.json before adding or removing entries."); }
+        Shown += (_, _) => RefreshGames();
         Render();
     }
 
@@ -133,7 +140,6 @@ internal sealed class Hub : Form
             Bounds = new(quick ? work.Right - width : work.Left + (work.Width - width) / 2,
                 quick ? work.Top : work.Top + (work.Height - height) / 2, width, height);
         }
-        if (quick) tab = "Frame gen";
         Render();
         Show();
         Activate();
@@ -204,15 +210,16 @@ internal sealed class Hub : Form
         {
             Clear();
             Line(quick ? "QUICK PANEL" : "LEGION FRAME HUB", quick ? 19 : 26, true);
-            Line(quick ? "Return to your game with Esc or the panel shortcut." : "Windows companion for Lenovo Legion Go  •  Preview 0.1.0");
+            Line(quick ? "Return to your game with Esc or the panel shortcut." : $"Unofficial Windows companion for Lenovo Legion Go  •  Preview {HubUpdate.Current.ToString(3)}");
             if (quick)
                 Buttons(("Full dashboard", () => OpenMode(false, false)), ("Close panel", Hide));
             else
-                Buttons(("Frame gen", () => SelectTab("Frame gen")), ("OptiScaler", () => SelectTab("OptiScaler")),
-                    ("Quick settings", () => SelectTab("Quick settings")), ("Drivers & apps", () => SelectTab("Drivers & apps")),
+                Buttons(("Installed Games", () => SelectTab("Installed Games")), ("Scalers", () => SelectTab("Scalers")),
+                    ("Frame Gen", () => SelectTab("Frame Gen")), ("Settings", () => SelectTab("Settings")),
                     ("Quick panel", () => OpenMode(true, false)));
             if (quick)
             {
+                Buttons(("Open Lenovo Legion Space", OpenLegionSpace));
                 FrameGeneration();
                 QuickSettings();
             }
@@ -220,10 +227,10 @@ internal sealed class Hub : Form
             {
                 switch (tab)
                 {
-                    case "OptiScaler": OptiPage(); break;
-                    case "Quick settings": QuickSettings(); break;
-                    case "Drivers & apps": Drivers(); break;
-                    default: FrameGeneration(); Help(); break;
+                    case "Scalers": OptiPage(); break;
+                    case "Frame Gen": FrameGeneration(); Help(); break;
+                    case "Settings": SettingsPage(); break;
+                    default: GamesPage(); break;
                 }
             }
             status.Text = message;
@@ -231,6 +238,98 @@ internal sealed class Hub : Form
         finally { stack.ResumeLayout(true); }
     }
     void SelectTab(string value) { tab = value; Render(); scroller.AutoScrollPosition = Point.Empty; }
+    void OpenLegionSpace()
+    {
+        LegionSpace.Launch();
+        if (quick) Hide();
+        Note("Asked Windows to open Lenovo Legion Space.");
+    }
+    void RefreshGames() => Run("Reading Steam libraries", async () =>
+    {
+        steamGames = await Task.Run(GameShelf.SteamGames);
+        if (tab == "Installed Games" && !quick) Render();
+        return $"Found {steamGames.Length} installed Steam entries and {localGames.Count} added games.";
+    });
+    void GamesPage()
+    {
+        Line("Installed Games", 16, true);
+        Line("Frame Hub checks local Steam libraries. For other launchers or standalone games, add the game’s executable.");
+        Buttons(("Refresh Steam games", RefreshGames), ("Add a game", AddGame), ("Open Steam library", () => Open("steam://open/games")));
+        var list = new ListBox { Height = 245, IntegralHeight = false, AccessibleName = "Installed games" };
+        list.Items.AddRange(steamGames.Concat(localGames).OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase).Cast<object>().ToArray());
+        if (list.Items.Count > 0) list.SelectedIndex = 0;
+        Field(list);
+        void Play()
+        {
+            if (list.SelectedItem is not GameShelf.Entry entry) return;
+            if (entry.Steam) Open("steam://run/" + entry.Location);
+            else
+            {
+                if (!File.Exists(entry.Location)) throw new FileNotFoundException("This game executable has moved. Add its current location.");
+                using var started = Process.Start(new ProcessStartInfo(entry.Location)
+                { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(entry.Location)! });
+            }
+        }
+        list.DoubleClick += (_, _) => { try { Play(); } catch (Exception e) { ShowError(e); } };
+        Buttons(("Play selected", Play), ("Manage game scaler", () =>
+        {
+            if (list.SelectedItem is not GameShelf.Entry entry) return;
+            if (entry.Steam) { game.Clear(); SelectTab("Scalers"); Note("Choose this Steam game’s main .exe to manage OptiScaler."); }
+            else { game.Text = entry.Location; SelectTab("Scalers"); InspectOpti(); }
+        }), ("Remove added game", () =>
+        {
+            if (list.SelectedItem is not GameShelf.Entry { Steam: false } entry) return;
+            var next = localGames.Where(item => item != entry).ToList();
+            GameShelf.Save(next); localGames = next;
+            Render(); Note("Removed the shortcut. No game files were deleted.");
+        }));
+    }
+    void AddGame()
+    {
+        using var dialog = new OpenFileDialog { Title = "Choose a game executable", Filter = "Game executable (*.exe)|*.exe", CheckFileExists = true };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        if (localGames.Any(item => item.Location.Equals(dialog.FileName, StringComparison.OrdinalIgnoreCase))) { Note("That game is already in the list."); return; }
+        List<GameShelf.Entry> next = [.. localGames, new(Path.GetFileNameWithoutExtension(dialog.FileName), dialog.FileName, false)];
+        GameShelf.Save(next); localGames = next;
+        Render(); Note("Game shortcut added.");
+    }
+    void SettingsPage()
+    {
+        Line("App updates", 14, true);
+        Buttons(("Check & install Frame Hub update", UpdateApp), ("Open GitHub Releases", () => Open(HubUpdate.Releases)),
+            ("Get GitHub CLI", () => Open("https://cli.github.com/")));
+        Line("The repo is private. Automatic updates use a signed-in GitHub CLI session on this PC. Browser downloads work without installing the CLI.");
+        Line("Legion buttons and fan", 14, true);
+        Buttons(("Open Lenovo Legion Space", OpenLegionSpace), ("Close Legion Space UI…", CloseSpace),
+            ("Lenovo downloads", () => Open(LegionSpace.Support)));
+        Buttons(("Open Handheld Companion", LegionSpace.OpenCompanion), ("Handheld Companion setup", () => Open(LegionSpace.Guide)),
+            ("Get Handheld Companion", () => Open(LegionSpace.Companion)));
+        Line("For physical buttons, map Legion R to Ctrl+Alt+F10 and Legion L to Ctrl+Alt+F11 in Handheld Companion. Closing the Lenovo window alone may not free the buttons. This app doesn’t stop or disable Lenovo services.");
+        Line("Set custom fan curves in Lenovo Legion Space or Handheld Companion on supported hardware. Use only one fan controller at a time. Frame Hub does not write to the fan controller.");
+        QuickSettings();
+        Drivers();
+    }
+    void CloseSpace()
+    {
+        if (MessageBox.Show(this,
+            "Close the Lenovo Legion Space window? Frame Hub will try a normal close first, then force-close only the verified UI process if needed. Unsaved Legion Space changes may be lost. No services or fan settings are changed.",
+            Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.OK) return;
+        Run("Closing Lenovo Legion Space UI", LegionSpace.CloseUi);
+    }
+    void UpdateApp() => Run("Checking GitHub for a Frame Hub update", async () =>
+    {
+        var update = await HubUpdate.Find();
+        if (update is null) return "This is the latest released version.";
+        var answer = MessageBox.Show(this, $"Install Frame Hub {update.Tag} from GitHub? The app will restart after it verifies the download. Your saved game list and OptiScaler files will not be changed.",
+            Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+        if (answer != DialogResult.OK) return "Update canceled.";
+        Note($"Downloading and verifying Frame Hub {update.Tag}…");
+        var path = await HubUpdate.Download(update);
+        HubUpdate.ReplaceWhenClosed(path, update.Digest);
+        quitting = true;
+        BeginInvoke(Close);
+        return "Verified. Restarting for update.";
+    });
     void FrameGeneration()
     {
         Line("Frame generation", 14, true);
@@ -251,7 +350,7 @@ internal sealed class Hub : Form
     {
         Line("Shortcuts", 14, true);
         Line("Quick panel: Ctrl+Alt+F10, or hold LB+RB and press View. Full dashboard: Ctrl+Alt+F11, or hold LB+RB and press Menu.");
-        Line("Controller chords require XInput and may also reach the game. Lenovo button bindings remain unchanged. Use borderless/windowed mode for the smoothest overlay experience.");
+        Line("Controller chords require XInput and may also reach the game. For optional physical Legion button mapping, see Settings. Use borderless/windowed mode for the smoothest overlay experience.");
     }
     async void Forward(string label, params ushort[] keys)
     {
@@ -394,7 +493,7 @@ internal sealed class Hub : Form
             ("Device Manager", () => Open("devmgmt.msc")));
         Line("For Lossless Scaling, Steam handles install, update and uninstall. This app does not bundle a Steam license or flash, replace, or remove drivers.");
         Buttons(("Open Steam library", () => Open("steam://open/games")), ("Lossless Scaling store", () => Open(Steam)),
-            ("Windows installed apps", () => Open("ms-settings:appsfeatures")), ("OptiScaler manager", () => SelectTab("OptiScaler")));
+            ("Windows installed apps", () => Open("ms-settings:appsfeatures")), ("OptiScaler manager", () => SelectTab("Scalers")));
     }
     void DriverInventory() => Run("Reading driver inventory", async () =>
     {

@@ -8,6 +8,7 @@
     <Nullable>enable</Nullable>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>LegionFrameHub</AssemblyName>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
+    <ApplicationIcon>Legion.ico</ApplicationIcon>
   </PropertyGroup>
 </Project>

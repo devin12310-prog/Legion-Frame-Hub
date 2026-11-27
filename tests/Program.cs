@@ -23,6 +23,14 @@ void Reject(Action act, string fragment, string description)
 }
 try
 {
+    var digest = new string('a', 64);
+    var current = new Version(0, 2, 0, 0);
+    var metadata = $$"""{"tag_name":"v0.3.0","assets":[{"name":"LegionFrameHub.exe","size":159000000,"digest":"sha256:{{digest}}"}]}""";
+    Expect(HubUpdate.ParseRelease(metadata, current)?.Digest == digest.ToUpperInvariant(), "accepts newer release with verified EXE metadata");
+    Expect(HubUpdate.ParseRelease(metadata.Replace("v0.3.0", "v0.2.0"), current) is null, "no update for current release");
+    Expect(HubUpdate.ParseRelease(metadata.Replace("v0.3.0", "v0.1.0"), current) is null, "older release cannot trigger a downgrade");
+    Reject(() => HubUpdate.ParseRelease(metadata.Replace("sha256:", ""), current), "verifiable", "rejects missing trusted release digest");
+    Reject(() => HubUpdate.ParseRelease(metadata.Replace("LegionFrameHub.exe", "unexpected.exe"), current), "verifiable", "rejects unexpected release asset");
     File.WriteAllText(InGame("game.exe"), "original game");
     File.WriteAllText(InGame("dxgi.dll"), "another mod");
     File.WriteAllText(InPackage("OptiScaler.dll"), "v1 test payload");
