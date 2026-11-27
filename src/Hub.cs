@@ -93,6 +93,7 @@ internal sealed class Hub : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        Native.DarkTitleBar(Handle);
         if (fixture) return;
         if (!Native.RegisterHotKey(Handle, 101, 0x4003, (uint)Keys.F10))
             Note("Ctrl+Alt+F10 is unavailable. Use the tray or controller chord.");
@@ -358,6 +359,9 @@ internal sealed class Hub : Form
             }
             finally { grid.ResumeLayout(); }
         }
+        var searchLabel = new Label { Text = "Search", AutoSize = true, ForeColor = Muted,
+            Margin = new(8, 16, 0, 0) };
+        toolbar.Controls.Add(searchLabel);
         toolbar.Controls.Add(search);
         toolbar.Controls.Add(Picker("Game tag", libraryTag, value => { libraryTag = value; libraryPage = 0; Populate(); },
             "All games", "Steam", "Added manually"));

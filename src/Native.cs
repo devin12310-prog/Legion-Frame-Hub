@@ -5,6 +5,12 @@ namespace FrameHub;
 
 internal static class Native
 {
+    [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
+    internal static void DarkTitleBar(IntPtr window)
+    {
+        int enabled = 1;
+        _ = DwmSetWindowAttribute(window, 20, ref enabled, sizeof(int));
+    }
     [DllImport("user32.dll", SetLastError = true)] internal static extern bool RegisterHotKey(IntPtr window, int id, uint mods, uint key);
     [DllImport("user32.dll")] internal static extern bool UnregisterHotKey(IntPtr window, int id);
     [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
