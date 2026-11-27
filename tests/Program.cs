@@ -24,6 +24,12 @@ void Reject(Action act, string fragment, string description)
 }
 try
 {
+    GameShelf.Entry[] shelf = [new("Neon Circuit", "1", true), new("Cobalt Dunes", "local.exe", false), new("Darkwater", "2", true)];
+    Expect(GameShelf.Filter(shelf, "", 0).Select(x => x.Name).SequenceEqual(new[] { "Cobalt Dunes", "Darkwater", "Neon Circuit" }),
+        "library cards are sorted by game name");
+    Expect(GameShelf.Filter(shelf, " CIRCUIT ", 1).Single().Name == "Neon Circuit", "game search and Steam tag work together");
+    Expect(GameShelf.Filter(shelf, "", 2).Single().Name == "Cobalt Dunes" &&
+        GameShelf.Filter(shelf, "Circuit", 2).Length == 0, "manual tag excludes Steam cards");
     var digest = new string('a', 64);
     var current = new Version(0, 2, 0, 0);
     var metadata = $$"""{"tag_name":"v0.3.0","assets":[{"name":"LegionFrameHub.exe","size":159000000,"digest":"sha256:{{digest}}"}]}""";

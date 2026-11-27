@@ -6,19 +6,31 @@ namespace FrameHub;
 
 internal static class GameShelf
 {
-    internal sealed record Entry(string Name, string Location, bool Steam)
+    internal sealed record Entry(string Name, string Location, bool Steam, string? InstallFolder = null)
     {
         public override string ToString() => Name + (Steam ? "  ·  Steam" : "  ·  Local");
     }
     internal static string DataFolder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LegionFrameHub");
     static string Config => Path.Combine(DataFolder, "games.json");
     static string ScalerGame => Path.Combine(DataFolder, "scaler-game.txt");
+    static string SteamLinks => Path.Combine(DataFolder, "steam-game-exes.json");
     internal static string? LoadScalerGame() => File.Exists(ScalerGame) ? File.ReadAllText(ScalerGame) : null;
     internal static void SaveScalerGame(string path)
     {
         Directory.CreateDirectory(DataFolder);
         File.WriteAllText(ScalerGame + ".tmp", path);
         File.Move(ScalerGame + ".tmp", ScalerGame, overwrite: true);
+    }
+    static Dictionary<string, string> LoadSteamLinks() => File.Exists(SteamLinks)
+        ? JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(SteamLinks)) ?? [] : [];
+    internal static string? LinkedSteamExe(string id) => LoadSteamLinks().GetValueOrDefault(id);
+    internal static void LinkSteamExe(string id, string path)
+    {
+        var links = LoadSteamLinks();
+        links[id] = path;
+        Directory.CreateDirectory(DataFolder);
+        File.WriteAllText(SteamLinks + ".tmp", JsonSerializer.Serialize(links));
+        File.Move(SteamLinks + ".tmp", SteamLinks, overwrite: true);
     }
     internal static List<Entry> Load() => File.Exists(Config)
         ? JsonSerializer.Deserialize<List<Entry>>(File.ReadAllText(Config)) ?? [] : [];
@@ -65,11 +77,15 @@ internal static class GameShelf
                 var dir = ReadValue(manifest, "installdir");
                 if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(dir) && dir is not "." and not ".." &&
                     !dir.Contains('\\') && !dir.Contains('/') && !dir.Contains(':') && Directory.Exists(Path.Combine(folder, "common", dir)))
-                    games.TryAdd(id, new Entry(name, id, true));
+                    games.TryAdd(id, new Entry(name, id, true, Path.Combine(folder, "common", dir)));
             }
         }
         return games.Values.OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
     }
+    internal static Entry[] Filter(IEnumerable<Entry> entries, string query, int tag) =>
+        entries.Where(entry => (tag != 1 || entry.Steam) && (tag != 2 || !entry.Steam) &&
+            entry.Name.Contains(query.Trim(), StringComparison.CurrentCultureIgnoreCase))
+            .OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     static string? ReadSteamRoot(RegistryKey key) { using (key) return key.GetValue("SteamPath") as string; }
 }

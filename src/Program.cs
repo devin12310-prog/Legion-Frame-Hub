@@ -3,8 +3,15 @@ namespace FrameHub;
 internal static class Program
 {
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
+        if (args is ["--ui-smoke", var output])
+        {
+            ApplicationConfiguration.Initialize();
+            using var fixture = new Hub(fixture: true);
+            fixture.CaptureFixture(Path.GetFullPath(output));
+            return;
+        }
         using var instance = new Mutex(true, @"Local\LegionFrameHub", out bool first);
         if (!first)
         {

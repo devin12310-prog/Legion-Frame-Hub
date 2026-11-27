@@ -12,3 +12,14 @@ jobs:
           dotnet-version: '8.0.x'
       - run: dotnet run --project tests/OptiFiles.Tests.csproj -c Release
       - run: dotnet publish src/LegionFrameHub.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none -o artifacts/win-x64
+      - name: Capture UI smoke test
+        shell: pwsh
+        run: |
+          $out = Join-Path $PWD 'artifacts/ui-smoke'
+          $app = Start-Process artifacts/win-x64/LegionFrameHub.exe -ArgumentList "--ui-smoke `"$out`"" -PassThru
+          if (!$app.WaitForExit(45000)) { $app.Kill(); throw 'The UI did not exit after its smoke test.' }
+          if ($app.ExitCode -ne 0 -or !(Test-Path "$out/library.png") -or !(Test-Path "$out/recommendation.png") -or !(Test-Path "$out/scalers.png")) { throw 'The UI smoke test did not produce all three views.' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-ui-smoke
+          path: artifacts/ui-smoke/*.png
